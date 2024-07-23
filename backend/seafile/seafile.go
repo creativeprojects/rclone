@@ -44,6 +44,7 @@ const (
 	configLibraryKey    = "library_key"
 	configCreateLibrary = "create_library"
 	configAuthToken     = "auth_token"
+	configRepoToken     = "repo_token"
 	minChunkSize        = 1 * fs.Mebi
 	defaultChunkSize    = 127 * fs.Mebi
 	maxChunkSize        = 511 * fs.Mebi
@@ -78,13 +79,13 @@ func init() {
 				Sensitive: true,
 			}, {
 				Name:      configUser,
-				Help:      "User name (usually email address).",
-				Required:  true,
+				Help:      "User name (usually email address). Leave blank if using a library API token.",
+				Required:  false, // don't need a username if using a library API token
 				Sensitive: true,
 			}, {
-				// Password is not required, it will be left blank for 2FA
 				Name:       configPassword,
-				Help:       "Password.",
+				Help:       "Password. Leave blank if using a library API token.",
+				Required:   false, // password will be left blank for 2FA
 				IsPassword: true,
 				Sensitive:  true,
 			}, {
@@ -92,8 +93,13 @@ func init() {
 				Help:    "Two-factor authentication ('true' if the account has 2FA enabled).",
 				Default: false,
 			}, {
+				Name:       configRepoToken,
+				Help:       "Library API token. Leave blank if using a user/password. Only valid for Seafile >= 11.0.4",
+				IsPassword: true,
+				Sensitive:  true,
+			}, {
 				Name: configLibrary,
-				Help: "Name of the library.\n\nLeave blank to access all non-encrypted libraries.",
+				Help: "Name of the library.\n\nLeave blank to access all non-encrypted libraries, or if using library API token.",
 			}, {
 				Name:       configLibraryKey,
 				Help:       "Library password (for encrypted libraries only).\n\nLeave blank if you pass it through the command line.",
@@ -162,6 +168,7 @@ type Options struct {
 	Password      string               `config:"pass"`
 	Is2FA         bool                 `config:"2fa"`
 	AuthToken     string               `config:"auth_token"`
+	RepoToken     string               `config:"repo_token"`
 	LibraryName   string               `config:"library"`
 	LibraryKey    string               `config:"library_key"`
 	CreateLibrary bool                 `config:"create_library"`
@@ -192,6 +199,7 @@ type Fs struct {
 	useOldDirectoryAPI  bool           // Use the old API v2 if seafile < 7
 	moveDirNotAvailable bool           // Version < 7.0 don't have an API to move a directory
 	noChunkUpload       bool           // Version < 7.0 don't have support for chunk upload
+	noRepoAPIToken      bool           // Version < 11.0.4 don't have support for repository API token
 	renew               *Renew         // Renew an encrypted library token
 	pool                *pool.Pool     // memory pool
 }
@@ -279,8 +287,8 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 	}
 	fs.Debugf(nil, "Seafile server version %s %s Edition", serverInfo.Version, edition)
 
-	// We don't support lower than seafile v6.0 (version 6.0 is already more than 3 years old)
 	serverVersion := semver.New(serverInfo.Version)
+	// We don't support lower than seafile v6.0 (first version 6.0 was available late 2016)
 	if serverVersion.Major < 6 {
 		return nil, errors.New("unsupported Seafile server (version < 6.0)")
 	}
@@ -292,6 +300,11 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 		f.moveDirNotAvailable = true
 		// no chunk upload either
 		f.noChunkUpload = true
+	}
+	if serverVersion.Major < 11 && serverVersion.Patch < 4 {
+		// repository API token landed in 11.0.4
+		// https://manual.seafile.com/changelog/server-changelog/#1104-2024-01-26
+		f.noRepoAPIToken = true
 	}
 
 	// Take the authentication token from the configuration first
