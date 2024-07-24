@@ -93,10 +93,9 @@ func init() {
 				Help:    "Two-factor authentication ('true' if the account has 2FA enabled).",
 				Default: false,
 			}, {
-				Name:       configRepoToken,
-				Help:       "Library API token. Leave blank if using a user/password. Only valid for Seafile >= 11.0.4",
-				IsPassword: true,
-				Sensitive:  true,
+				Name:      configRepoToken,
+				Help:      "Library API token. Leave blank if using a user/password. Only valid for Seafile >= 11.0.4",
+				Sensitive: true,
 			}, {
 				Name: configLibrary,
 				Help: "Name of the library.\n\nLeave blank to access all non-encrypted libraries, or if using library API token.",
@@ -307,8 +306,13 @@ func NewFs(ctx context.Context, name, root string, m configmap.Mapper) (fs.Fs, e
 		f.noRepoAPIToken = true
 	}
 
-	// Take the authentication token from the configuration first
-	token := f.opt.AuthToken
+	token := ""
+	if f.opt.AuthToken != "" {
+		token = f.opt.AuthToken
+	} else if f.opt.RepoToken != "" {
+		token = f.opt.RepoToken
+		fs.Debugf(nil, "Using library API token")
+	}
 	if token == "" {
 		// If not available, send the user/password instead
 		token, err = f.authorizeAccount(ctx)
@@ -742,7 +746,7 @@ func (f *Fs) Rmdir(ctx context.Context, dir string) error {
 func (f *Fs) ListR(ctx context.Context, dir string, callback fs.ListRCallback) error {
 	var err error
 
-	if dir == "" && f.libraryName == "" {
+	if dir == "" && f.libraryName == "" && f.opt.RepoToken == "" {
 		libraries, err := f.listLibraries(ctx)
 		if err != nil {
 			return err
@@ -1260,6 +1264,14 @@ func (f *Fs) splitPath(dir string) (library, folder string) {
 }
 
 func (f *Fs) listDir(ctx context.Context, dir string, recursive bool) (entries fs.DirEntries, err error) {
+	if f.opt.RepoToken != "" {
+		directoryEntries, err := f.getDirectoryEntriesWithRepoToken(ctx, dir, recursive)
+		if err != nil {
+			return nil, err
+		}
+
+		return f.buildDirEntriesFromRepoToken(dir, dir, directoryEntries, recursive), nil
+	}
 	libraryName, dirPath := f.splitPath(dir)
 	libraryID, err := f.getLibraryID(ctx, libraryName)
 	if err != nil {
@@ -1289,22 +1301,7 @@ func (f *Fs) listDirCallback(ctx context.Context, dir string, callback fs.ListRC
 
 func (f *Fs) buildDirEntries(parentPath, libraryID, parentPathInLibrary string, directoryEntries []api.DirEntry, recursive bool) (entries fs.DirEntries) {
 	for _, entry := range directoryEntries {
-		var filePath, filePathInLibrary string
-		if recursive {
-			// In recursive mode, paths are built from DirEntry (+ a starting point)
-			entryPath := strings.TrimPrefix(entry.Path, "/")
-			// If we're listing from some path inside the library (not the root)
-			// there's already a path in parameter, which will also be included in the entry path
-			entryPath = strings.TrimPrefix(entryPath, parentPathInLibrary)
-			entryPath = strings.TrimPrefix(entryPath, "/")
-
-			filePath = path.Join(parentPath, entryPath, entry.Name)
-			filePathInLibrary = path.Join(parentPathInLibrary, entryPath, entry.Name)
-		} else {
-			// In non-recursive mode, paths are build from the parameters
-			filePath = path.Join(parentPath, entry.Name)
-			filePathInLibrary = path.Join(parentPathInLibrary, entry.Name)
-		}
+		filePath, filePathInLibrary := buildObjectPaths(parentPath, parentPathInLibrary, entry.Path, entry.Name, recursive)
 		if entry.Type == api.FileTypeDir {
 			d := fs.
 				NewDir(filePath, time.Unix(entry.Modified, 0)).
@@ -1320,6 +1317,32 @@ func (f *Fs) buildDirEntries(parentPath, libraryID, parentPathInLibrary string, 
 				size:          entry.Size,
 				modTime:       time.Unix(entry.Modified, 0),
 				libraryID:     libraryID,
+			}
+			entries = append(entries, object)
+		}
+	}
+	return entries
+}
+
+func (f *Fs) buildDirEntriesFromRepoToken(parentPath, parentPathInLibrary string, directoryEntries []api.DirEntryRepoToken, recursive bool) (entries fs.DirEntries) {
+	for _, entry := range directoryEntries {
+		filePath, filePathInLibrary := buildObjectPaths(parentPath, parentPathInLibrary, entry.Path, entry.Name, recursive)
+		modified, _ := time.Parse("2006-01-02T15:04:05-07:00", entry.Modified)
+		if entry.Type == api.FileTypeDir {
+			d := fs.
+				NewDir(filePath, modified).
+				SetSize(entry.Size).
+				SetID(entry.ID)
+			entries = append(entries, d)
+		} else if entry.Type == api.FileTypeFile {
+			object := &Object{
+				fs:            f,
+				id:            entry.ID,
+				remote:        filePath,
+				pathInLibrary: filePathInLibrary,
+				size:          entry.Size,
+				modTime:       modified,
+				libraryID:     "",
 			}
 			entries = append(entries, object)
 		}

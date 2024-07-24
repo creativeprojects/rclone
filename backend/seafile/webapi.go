@@ -19,8 +19,9 @@ import (
 
 // Start of the API URLs
 const (
-	APIv20 = "api2/repos/"
-	APIv21 = "api/v2.1/repos/"
+	APIv20          = "api2/repos/"
+	APIv21          = "api/v2.1/repos/"
+	APIv21RepoToken = "api/v2.1/via-repo-token/"
 )
 
 // Errors specific to seafile fs
