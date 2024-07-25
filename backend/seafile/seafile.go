@@ -1042,6 +1042,18 @@ func (f *Fs) CleanUp(ctx context.Context) error {
 
 // About gets quota information
 func (f *Fs) About(ctx context.Context) (usage *fs.Usage, err error) {
+	if f.opt.RepoToken != "" {
+		info, err := f.getRepoInfo(ctx)
+		if err != nil {
+			return nil, err
+		}
+		fs.Debugf(nil, "Library ID: %s, name: %q, last modified: %s", info.RepoID, info.RepoName, info.LastModified)
+		usage = &fs.Usage{
+			Used:    fs.NewUsageValue(int64(info.Size)),      // bytes in use
+			Objects: fs.NewUsageValue(int64(info.FileCount)), // number of objects
+		}
+		return usage, nil
+	}
 	accountInfo, err := f.getUserAccountInfo(ctx)
 	if err != nil {
 		return nil, err
