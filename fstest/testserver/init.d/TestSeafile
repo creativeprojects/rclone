@@ -5,12 +5,14 @@ set -e
 # environment variables passed on docker compose
 export NAME=seafile
 export MYSQL_ROOT_PASSWORD=pixenij4zacoguq0kopamid6
+export JWT_PRIVATE_KEY=wuvodet3lijaxor5rutigew9pafokob2cexenam1
 export SEAFILE_ADMIN_EMAIL=seafile@rclone.org
 export SEAFILE_ADMIN_PASSWORD=pixenij4zacoguq0kopamid6
 export SEAFILE_IP=127.0.0.1
 export SEAFILE_PORT=8087
 export SEAFILE_TEST_DATA=${SEAFILE_TEST_DATA:-/tmp/seafile-test-data}
-export SEAFILE_VERSION=${SEAFILE_VERSION:-latest}
+# the "latest" tag on docker hub is stale so track the latest major version instead
+export SEAFILE_VERSION=${SEAFILE_VERSION:-14.0-latest}
 
 # make sure the data directory exists
 mkdir -p ${SEAFILE_TEST_DATA}/${NAME}
@@ -25,7 +27,7 @@ start() {
     seafile_endpoint="http://${SEAFILE_IP}:${SEAFILE_PORT}/"
     wait_seconds=1
     echo -n "Waiting for Seafile server to start"
-    for iterations in `seq 1 60`;
+    for iterations in `seq 1 120`;
     do
       http_code=$(curl -s -o /dev/null -L -w '%{http_code}' "$seafile_endpoint" || true;)
       if [ "$http_code" -eq 200 ]; then
@@ -35,6 +37,10 @@ start() {
       echo -n "."
       sleep $wait_seconds
     done
+    if [ "$http_code" -ne 200 ]; then
+      echo "Seafile server did not start" >&2
+      return 1
+    fi
 
     # authentication token answer should be like: {"token":"dbf58423f1632b5b679a13b0929f1d0751d9250c"}
     TOKEN=`curl --silent \

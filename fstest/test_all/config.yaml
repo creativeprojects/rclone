@@ -639,6 +639,16 @@ backends:
    fastlist: true
    ignoretests:
      - cmd/gitannex
+ - backend:  "seafile"
+   remote:   "TestSeafileV11:"
+   fastlist: true
+   ignoretests:
+     - cmd/gitannex
+ - backend:  "seafile"
+   remote:   "TestSeafileEncryptedV11:"
+   fastlist: true
+   ignoretests:
+     - cmd/gitannex
  - backend:  "smb"
    remote:   "TestSMB:rclone"
    fastlist: false
